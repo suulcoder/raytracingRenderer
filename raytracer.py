@@ -12,25 +12,26 @@ Render Class: This class is an BMP image renderer
 from mathModule import *
 from encoder import *
 from math import pi, tan
-from colorModule import BLACK, WHITE, color
+from color import color
+from light import *
 
 class Raytracer(object):
   def __init__(self, width, height):
     self.width = width
     self.height = height
-    self.current_color = WHITE
+    self.background_color = color(0, 0, 0)
+    self.scene = []
+    self.light = None
     self.clear()
 
-  def clear(self,texture=None):
+  def clear(self):
     self.pixels = [
-      [BLACK for x in range(self.width)] 
+      [self.background_color for x in range(self.width)]
       for y in range(self.height)
     ]
 
   def write(self, filename):
     f = open(filename, 'bw')
-
-    # File header (14 bytes)
     f.write(char('B'))
     f.write(char('M'))
     f.write(dword(14 + 40 + self.width * self.height * 3))
@@ -53,14 +54,10 @@ class Raytracer(object):
     # Pixel data (width x height x 3 pixels)
     for x in range(self.height):
       for y in range(self.width):
-        f.write(self.pixels[x][y])
-
+        f.write(self.pixels[x][y].toBytes())
     f.close()
 
   def display(self, filename='out.bmp'):
-    """
-    Displays the image, a external library (wand) is used, but only for convenience during development
-    """
     self.write(filename)
 
     try:
@@ -72,34 +69,61 @@ class Raytracer(object):
     except ImportError:
       pass  # do nothing if no wand is installed
 
-  def set_color(self, color):
-    self.current_color = color
-
-  def point(self, x, y, color = None):
-    # 0,0 was intentionally left in the bottom left corner to mimic opengl
+  def point(self, x, y, c = None):
     try:
-      self.pixels[y][x] = color or self.current_color
+      self.pixels[y][x] = c or self.current_color
     except:
-      # To avoid index out of range exceptions
       pass
 
-  def scene_intersect(self,orig,direction):
-  	for obj in self.scene:
-  		if obj.ray_intersect(orig,direction):
-  			return obj.material
-  	return None
+  def cast_ray(self, orig, direction):
+    material, intersect = self.scene_intersect(orig, direction)
 
-  def cast_ray(self,orig,direction):
-  	impacted = self.scene_intersect(orig,direction)
-  	if impacted:
-  		return impacted.diffuse
-  	return color(0,0,0)
+    if material is None:
+      return self.background_color
+
+    light_dir = norm(sub(self.light.position, intersect.point))
+    light_distance = length(sub(self.light.position, intersect.point))
+
+    offset_normal = mul(intersect.normal, 1.1)  # avoids intercept with itself
+    shadow_orig = sub(intersect.point, offset_normal) if dot(light_dir, intersect.normal) < 0 else sum(intersect.point, offset_normal)
+    shadow_material, shadow_intersect = self.scene_intersect(shadow_orig, light_dir)
+    shadow_intensity = 0
+
+    if shadow_material and length(sub(shadow_intersect.point, shadow_orig)) < light_distance:
+      shadow_intensity = 0.9
+
+    intensity = self.light.intensity * max(0, dot(light_dir, intersect.normal)) * (1 - shadow_intensity)
+
+    reflection = reflect(light_dir, intersect.normal)
+    specular_intensity = self.light.intensity * (
+      max(0, -dot(reflection, direction))**material.spec
+    )
+
+    diffuse = material.diffuse * intensity * material.albedo[0]
+    specular = color(255, 255, 255) * specular_intensity * material.albedo[1]
+    return diffuse + specular
+
+  def scene_intersect(self, orig, direction):
+    zbuffer = float('inf')
+
+    material = None
+    intersect = None
+
+    for obj in self.scene:
+      hit = obj.ray_intersect(orig, direction)
+      if hit is not None:
+        if hit.distance < zbuffer:
+          zbuffer = hit.distance
+          material = obj.material
+          intersect = hit
+
+    return material, intersect
 
   def render(self):
-  	fov = pi/2
-  	for y in range(self.height):
-  		for x in range(self.width):
-  			i = (2 * (x + 0.5)/self.width - 1) * self.width/self.height * tan(fov/2)
-  			j = (1 - 2 * (y + 0.5)/self.height) * tan(fov/2)
-  			direction = norm(V3(i,j,-1))
-  			self.point(x,y,self.cast_ray(V3(0,0,0),direction))
+    fov = int(pi/2)
+    for y in range(self.height):
+      for x in range(self.width):
+        i =  (2*(x + 0.5)/self.width - 1) * tan(fov/2) * self.width/self.height
+        j =  (2*(y + 0.5)/self.height - 1) * tan(fov/2)
+        direction = norm(V3(i, j, -1))
+        self.pixels[y][x] = self.cast_ray(V3(0,0,0), direction)
