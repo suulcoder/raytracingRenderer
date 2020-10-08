@@ -1,7 +1,45 @@
+from lib import *
+from dataclasses import dataclass
+import png
+from math import pi, acos, atan2
 
-from mathModule import *
-from math import sqrt
-from intersect import Intersect
+WHITE = color(255, 255, 255)
+
+class Light(object):
+  def __init__(self, position=V3(0,0,0), intensity=1):
+    self.position = position
+    self.intensity = intensity
+
+class Material(object):
+  def __init__(self, color=WHITE, albedo=(1, 0, 0, 0), spec=0, refractive_index=1, texture=None):
+    self.color = color
+    self.albedo = albedo
+    self.spec = spec
+    self.refractive_index = refractive_index
+    self.texture = texture
+
+  def read(self):
+      reader = png.Reader(filename=self.texture)
+      self.width, self.height, self.pixels, self.metadata = reader.read_flat()
+
+  def diffuse(self,point,direction):
+    if(self.texture):
+      self.read()
+
+      index = int(point.y * self.width + point.x) * 3 % len(self.pixels)
+
+      processed = self.pixels[index:index+3]
+      print(processed)
+      return color(processed[0], processed[1], processed[2])
+
+    return self.color
+
+
+class Intersect(object):
+  def __init__(self, distance, point, normal):
+    self.distance = distance
+    self.point = point
+    self.normal = normal
 
 class Sphere(object):
   def __init__(self, center, radius, material):
